@@ -8,18 +8,12 @@ https://www.facebook.com/groups/443709852472133?locale=zh_TW
 ## 預期格式
 ```json
 {
-    "type": "主文/留言 (先只保留主文)",
+    "type": "主文/留言",
     "content": "內容",
     "post_time": "發文時間",
-    "author": "留言者"
-    "url": "連結 (方便我檢查)"
-    "comments": [
-        {
-            "content": "留言內容",
-            "post_time": 1752419048000,
-            "author": "留言的人"
-        }
-    ]
+    "author": "發文者/留言者"
+    "post_url": "連結 (方便我檢查)"
+    "other": [放其他東西]
 }
 ```
 
@@ -38,7 +32,7 @@ scrapy crawl example
 
 ## 使用前備註
 - 主要執行的檔案 `/myproject/myproject/spiders/example.py`
-    - 執行前，請先將 ookies, headers, payload 更換成自己的
+    - 執行前，請先將 cookies, headers, payload 更換成自己的
     - 可以設定翻頁上限, 時間區間
 - 沒有實做自動化，因為有太多參數需要進瀏覽器取得，所以仍須手動運作
 - 僅供分享學習用途，請勿用於非法用途，概不負責
