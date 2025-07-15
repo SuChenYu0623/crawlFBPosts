@@ -1,7 +1,6 @@
 import scrapy
 import json
 import time
-
 import urllib.parse
 
 
@@ -71,7 +70,7 @@ class ExampleSpider(scrapy.Spider):
     # config
     page_count = 0
     page_limit = 1000
-    time_range = 90 * 24 * 60 * 60 * 1000
+    time_range = 90 * 24 * 60 * 60
     posts_data_list = []
     def start_requests(self):
         yield scrapy.FormRequest(
@@ -91,17 +90,21 @@ class ExampleSpider(scrapy.Spider):
             "type": "主文/留言",
             "content": "內容",
             "post_time": "發文時間",
-            "author": "留言者"
-            "url": "連結 (方便我檢查)"
-            "comments": [
-                {
-                    "content": "怎麽可能...",
-                    "post_time": 1752419048000,
-                    "author": "Nana Angler"
-                }
-            ]
+            "author": "發文者/留言者"
+            "post_url": "連結 (方便我檢查)"
+            "other": [放其他東西]
         }
         '''
+        # 定義資料結構
+        post_data = {
+            'type': '',
+            'author': '',
+            'content': '',
+            'post_time': '',
+            'other': [],
+            'post_url': ''
+        }
+
         # 固定
         print(f'\n=== 第{self.page_count}頁 parse api ===')
         self.page_count += 1
@@ -116,7 +119,7 @@ class ExampleSpider(scrapy.Spider):
             if 'errors' in data.keys():
                 print('errors', data['errors'])
                 continue
-            
+
             try:
                 # 先拿翻頁
                 if data['label'] == "GroupsCometFeedRegularStories_paginationGroup$defer$GroupsCometFeedRegularStories_group_group_feed$page_info":
@@ -124,60 +127,101 @@ class ExampleSpider(scrapy.Spider):
                         print(f'更新前 ====\n {end_cursor}')
                         end_cursor = data['data']['page_info']['end_cursor']
                         print(f'更新後 ====\n {end_cursor}')
+
                 # 拿貼文內容
                 elif data['label'] == "GroupsCometFeedRegularStories_paginationGroup$stream$GroupsCometFeedRegularStories_group_group_feed":
-                    # 作者
-                    author = data['data']['node']['actors'][0]['name']
-                    # 貼文
-                    content = ''
-                    if data['data']['node']['comet_sections']['content']['story']['message']:
-                        content = data['data']['node']['comet_sections']['content']['story']['message']['text']
-
-                    # 發文時間
+                    # 共用參數
                     post_time = data['data']['node']['comet_sections']['timestamp']['story']['creation_time']
+                    post_time = float(post_time)
+                    post = data['data']['node']['comet_sections']['content']['story']
+                    post_url = post['wwwURL']
 
-                    # 連結 (選)
-                    url = data['data']['node']['comet_sections']['content']['story']['wwwURL']
+                    # 1. 一般貼文
+                    try:
+                        post_data['type'] = '主文'
+                        post_data['post_url'] = post_url
+                        post_data['author'] = post['actors'][0]['name']
+                        post_data['content'] = (post.get('message') or {}).get('text', '') # 不一定有內文
+                        post_data['post_time'] = post_time
+
+                        # 其他插入內容
+                        ## 1.1 連結 or video attachment
+                        if len(post.get('attachments', [])):
+                            url_desc = post['attachments'][0]['comet_footer_renderer']['attachment'].get('title_with_entities', {}).get('text', '') # 網址文字說明 (不一定有這個)
+                            url = post['attachments'][0]['comet_footer_renderer']['attachment'].get('story_attachment_link_renderer', {}).get('attachment', {}).get('url', '') # 網址
+                            if url_desc and url:
+                                post_data['other'].append({
+                                    'attachment': f"{url_desc}\n {url}"
+                                })
+
+                            videoId = post['attachments'][0].get('target', {}).get('id', None)
+                            if videoId:
+                                post_data['other'].append({
+                                    'attachment': f"https://www.facebook.com/reel/{videoId}"
+                                })
+                        ## 1.2 插入貼文 attached_story
+                        if post['attached_story']:
+                            attached_story = post['attached_story']
+                            attached_story_postUrl = attached_story['wwwURL']
+                            attached_story_author = attached_story['actors'][0]['name']
+                            attached_story_content = (attached_story.get('message') or {}).get('text', '') # 不一定有內文
+                            post_data['other'].append({
+                                'attached_story': f"{attached_story_author} {attached_story_content} {attached_story_postUrl}"
+                            })
                     
-                    # 留言
-                    comments = []
-                    # 第一層留言 (時間因素，先只爬這裡，如果要向下挖，看起來小麻煩)
-                    top_comments = data.get('data', {}) \
-                        .get('node', {}) \
-                        .get('comet_sections', {}) \
-                        .get('feedback', {}) \
-                        .get('story', {}) \
-                        .get('story_ufi_container', {}) \
-                        .get('story', {}) \
-                        .get('feedback_context', {}) \
-                        .get('interesting_top_level_comments', []) \
-                                        
-                    for top_comment in top_comments:
-                        comment = top_comment.get('comment', {})
-                        comment_author = comment.get('author', {}).get('name', '')
-                        comment_content = comment.get('body', {}).get('text', '')
-                        comment_post_time = comment.get('created_time', '')
-                        
-                        comments.append({
-                            "content": comment_content,
-                            "post_time": comment_post_time * 1000,
-                            "author": comment_author
-                        })
+                    except Exception as e:
+                        if len(post.get('attachments', [])):
+                            print('pass attachments')
+                        if post['attached_story']:
+                            print('pass attached_story')
+                        print('主文報錯', e)
+                        # print(e, post_data)
+                        # print(data)
+                        # print(post)
 
-                    post_data = {
-                        "type": "主文",
-                        "content": content,
-                        "post_time": post_time * 1000,
-                        "author": author,
-                        "url": url,
-                        "comments": comments
-                    }
-
-                    # 過濾 90 天內 (約等於30天)
-                    now_time = time.time() * 1000
+                    # 過濾 90 天內 (約等於30天) (主文)
+                    now_time = time.time()
                     if post_data['post_time'] >= now_time - self.time_range:
                         self.posts_data_list.append(post_data)
                         insert += 1
+
+                    # 2. 留言
+                    story = data['data']['node']['comet_sections']['feedback']['story']['story_ufi_container']['story']
+                    comments = story.get('feedback_context', {}).get('interesting_top_level_comments', [{}])
+                    comment = None
+                    if comments:
+                        comment = comments[0].get('comment', None)
+                    if comment:
+                        # 清空 post_data
+                        post_data = {
+                            'type': '',
+                            'author': '',
+                            'content': '',
+                            'post_time': '',
+                            'other': [],
+                            'post_url': ''
+                        }
+                        try:
+                            comment_post_time = list(json.loads(story['tracking'])['page_insights'].values())[0]['post_context']['publish_time']
+                            comment_author = comment['author']['name']
+                            comment_content = comment['body'].get('text', '')
+                            post_data['type'] = '留言'
+                            post_data['postUrl'] = post_url
+                            post_data['author'] = comment_author
+                            post_data['content'] = comment_content
+                            post_data['post_time'] = comment_post_time
+
+                            # 過濾 90 天內 (約等於30天) (留言)
+                            now_time = time.time()
+                            if post_data['post_time'] >= now_time - self.time_range:
+                                self.posts_data_list.append(post_data)
+                                insert += 1
+                            
+                        except Exception as e:
+                            print('留言報錯', e)
+                            # print('留言報錯', e, post_data)
+                            # print(data)
+                            # print(post)                    
 
             except Exception as e:
                 print('Err', e)
@@ -196,7 +240,7 @@ class ExampleSpider(scrapy.Spider):
                 end_task_reason = '不應該觸發，得修'
             print('工作結束原因:', end_task_reason)
             print('最後一頁:', self.page_count, self.page_limit)
-            with open('output.json', 'w', encoding='utf-8') as f:
+            with open('output_new.json', 'w', encoding='utf-8') as f:
                 json.dump(
                     self.posts_data_list, 
                     f, 
